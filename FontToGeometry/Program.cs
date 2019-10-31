@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
@@ -87,9 +88,7 @@ namespace FontToGeometry
 
                     using (var p = new GraphicsPath())
                     {
-                        p.AddString(c.ToString(), font, (int)style, size, Point.Empty, StringFormat.GenericDefault);
-
-                        p.Flatten(new Matrix(), 0.01f);
+                        p.AddString(c.ToString(), font, (int)style, size, Point.Empty, StringFormat.GenericTypographic);
 
                         var points = new List<PointF>();
                         points.AddRange(p.PathPoints);
@@ -97,26 +96,53 @@ namespace FontToGeometry
 
                         PointF? loopStart = null;
 
+                        var seg = 0;
                         for (var i = 0; i < points.Count; i++)
                         {
                             var iA = i;
                             var iB = i - 1;
 
-                            var tStart = iB / (float)points.Count;
-                            var tEnd = iA / (float)points.Count;
+                            var tStart = (seg - 1) / (float)points.Count;
+                            var tEnd = seg / (float)points.Count;
 
-                            if ((p.PathTypes[i % p.PointCount] & maskType) == 0)
+                            var type = (p.PathTypes[i % p.PointCount] & maskType);
+
+                            switch (type)
                             {
-                                if (loopStart.HasValue)
-                                    AddSegment(segments, points[iB], loopStart.Value, ascent, tStart, tEnd);
+                                case 0:
+                                    {
+                                        if (loopStart.HasValue)
+                                            AddLineSegment(segments, points[iB], loopStart.Value, ascent, tStart, tEnd);
 
-                                loopStart = points[iA];
-                                continue;
+                                        loopStart = points[iA];
+                                        break;
+                                    }
+                                case 1:
+                                    {
+                                        AddLineSegment(segments, points[iA], points[iB], ascent, tStart, tEnd);
+                                        break;
+                                    }
+                                case 3:
+                                    {
+                                        AddCubicSegment(segments, points[(i - 1) % points.Count], points[(i + 0) % points.Count], points[(i + 1) % points.Count], points[(i + 2) % points.Count], ascent, tStart, tEnd);
+                                        i += 2;
+                                        break;
+                                    }
+                                default:
+                                    throw new IndexOutOfRangeException("Invalid type!");
                             }
 
-                            AddSegment(segments, points[iA], points[iB], ascent, tStart, tEnd);
+                            seg++;
                         }
                     }
+
+                    // The output functions depend on these two utility functions:
+
+                    // Linear interpolation
+                    // \phi\left(a_{1},b_{1},t_{1}\right)=t_{1}a_{1}+\left(1-t_{1}\right)b_{1}
+
+                    // Cubic bezier interpolation
+                    // B_{c}\left(p_{0},p_{1},p_{2},p_{3},t_{1}\right)=\left(1-t_{1}\right)^{3}p_{0}+3\left(1-t_{1}\right)^{2}t_{1}p_{1}+3\left(1-t_{1}\right)t_{1}^{2}p_{2}+t_{1}^{3}p_{3}
 
                     t.Write($"S_{{{name}cx}}\\left(t_1\\right)=\\left\\{{");
                     t.Write(string.Join(",", segments.Select(segment => segment.ToStringX())));
@@ -131,46 +157,93 @@ namespace FontToGeometry
             }
         }
 
-        private static void AddSegment(ICollection<Segment> segments, PointF a, PointF b, float ascent, float tStart, float tEnd)
+        private static void AddLineSegment(ICollection<Segment> segments, PointF a, PointF b, float ascent, float tStart, float tEnd)
         {
             a.Y = ascent - a.Y;
             b.Y = ascent - b.Y;
 
-            segments.Add(new Segment(tStart, tEnd, a, b));
+            segments.Add(new LineSegment(tStart, tEnd, a, b));
+        }
+
+        private static void AddCubicSegment(ICollection<Segment> segments, PointF a, PointF b, PointF c, PointF d, float ascent, float tStart, float tEnd)
+        {
+            a.Y = ascent - a.Y;
+            b.Y = ascent - b.Y;
+            c.Y = ascent - c.Y;
+            d.Y = ascent - d.Y;
+
+            segments.Add(new CubicSegment(tStart, tEnd, a, b, c, d));
         }
     }
 
-    internal struct Segment
+    internal class LineSegment : Segment
     {
         public float ValueStart;
         public float ValueEnd;
         public PointF Start;
         public PointF End;
 
-        public Segment(float valueStart, float valueEnd, PointF start, PointF end)
+        public LineSegment(float valueStart, float valueEnd, PointF start, PointF end)
         {
             ValueStart = valueStart;
             ValueEnd = valueEnd;
             Start = start;
             End = end;
         }
-        
-        public string ToStringX()
+
+        public override string ToStringX()
         {
             return $"{Str(ValueStart)}<t_1<{Str(ValueEnd)}:\\phi\\left({Str(Start.X)},{Str(End.X)},\\frac{{\\left(t_1-{Str(ValueStart)}\\right)}}{{{Str(ValueEnd - ValueStart)}}}\\right)";
         }
 
-        public string ToStringY()
+        public override string ToStringY()
         {
             return $"{Str(ValueStart)}<t_1<{Str(ValueEnd)}:\\phi\\left({Str(Start.Y)},{Str(End.Y)},\\frac{{\\left(t_1-{Str(ValueStart)}\\right)}}{{{Str(ValueEnd - ValueStart)}}}\\right)";
         }
+    }
+
+    internal class CubicSegment : Segment
+    {
+        public float ValueStart;
+        public float ValueEnd;
+        public PointF A;
+        public PointF B;
+        public PointF C;
+        public PointF D;
+
+        public CubicSegment(float valueStart, float valueEnd, PointF a, PointF b, PointF c, PointF d)
+        {
+            ValueStart = valueStart;
+            ValueEnd = valueEnd;
+            A = a;
+            B = b;
+            C = c;
+            D = d;
+        }
+
+        public override string ToStringX()
+        {
+            return $"{Str(ValueStart)}<t_1<{Str(ValueEnd)}:B_{{c}}\\left({Str(A.X)},{Str(B.X)},{Str(C.X)},{Str(D.X)},\\frac{{t_1-{Str(ValueStart)}}}{{{Str(ValueEnd - ValueStart)}}}\\right)";
+        }
+
+        public override string ToStringY()
+        {
+            return $"{Str(ValueStart)}<t_1<{Str(ValueEnd)}:B_{{c}}\\left({Str(A.Y)},{Str(B.Y)},{Str(C.Y)},{Str(D.Y)},\\frac{{t_1-{Str(ValueStart)}}}{{{Str(ValueEnd - ValueStart)}}}\\right)";
+        }
+    }
+
+    internal abstract class Segment
+    {
+        public abstract string ToStringX();
+
+        public abstract string ToStringY();
 
         /// <summary>
         /// Gets rid of scientific notation
         /// </summary>
         /// <param name="input"></param>
         /// <returns></returns>
-        private static string Str(double input)
+        protected static string Str(double input)
         {
             var strOrig = input.ToString(CultureInfo.InvariantCulture);
             var str = strOrig.ToUpper();
