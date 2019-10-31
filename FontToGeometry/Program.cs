@@ -5,6 +5,7 @@ using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,11 +24,66 @@ namespace FontToGeometry
 
             var ascent = font.GetCellAscent(style) / (float)font.GetEmHeight(style) * size;
 
+            var chars = new Dictionary<char, string>
+            {
+                {'~', "Grave"},
+                {'`', "Tick"},
+                {'1', "1"},
+                {'2', "2"},
+                {'3', "3"},
+                {'4', "4"},
+                {'5', "5"},
+                {'6', "6"},
+                {'7', "7"},
+                {'8', "8"},
+                {'9', "9"},
+                {'0', "0"},
+                {'!', "Excl"},
+                {'@', "At"},
+                {'#', "Pound"},
+                {'$', "Dollar"},
+                {'%', "Percent"},
+                {'^', "Carrot"},
+                {'&', "Amp"},
+                {'*', "Ast"},
+                {'(', "OPar"},
+                {')', "CPar"},
+                {'_', "Under"},
+                {'-', "Minus"},
+                {'+', "Plus"},
+                {'=', "Equals"},
+                {'{', "OCur"},
+                {'}', "CCur"},
+                {'[', "OSqr"},
+                {']', "CSqr"},
+                {'|', "Pipe"},
+                {'\\', "BSlash"},
+                {':', "Colon"},
+                {';', "Semi"},
+                {'"', "DQuo"},
+                {'\'', "SQuo"},
+                {'<', "Lt"},
+                {'>', "Gt"},
+                {'?', "Ques"},
+                {',', "Comma"},
+                {'.', "Period"},
+                {'/', "Slash"},
+            };
+
+            for (var i = 'a'; i <= 'z'; i++)
+                chars.Add(i, i.ToString());
+
+            for (var i = 'A'; i <= 'Z'; i++)
+                chars.Add(i, i.ToString());
+
             using (var t = new StreamWriter("out.txt"))
             {
-                for (var c = 'A'; c <= 'Z'; c++)
+                foreach (var pair in chars)
                 {
                     var segments = new List<Segment>();
+
+                    var c = pair.Key;
+                    var name = pair.Value;
 
                     using (var p = new GraphicsPath())
                     {
@@ -62,15 +118,15 @@ namespace FontToGeometry
                         }
                     }
 
-                    t.Write(c + "_{x}\\left(t_1\\right)=\\left\\{");
+                    t.Write($"S_{{{name}cx}}\\left(t_1\\right)=\\left\\{{");
                     t.Write(string.Join(",", segments.Select(segment => segment.ToStringX())));
                     t.WriteLine("\\right\\}");
 
-                    t.Write(c + "_{y}\\left(t_1\\right)=\\left\\{");
+                    t.Write($"S_{{{name}cy}}\\left(t_1\\right)=\\left\\{{");
                     t.Write(string.Join(",", segments.Select(segment => segment.ToStringY())));
                     t.WriteLine("\\right\\}");
 
-                    t.WriteLine($"L_{c}\\left(x_1,y_1,s_1,t_1\\right)=\\left(s_1{c}_{{x}}\\left(t_1\\right)+x_1,s_1{c}_{{y}}\\left(t_1\\right)+y_1\\right)");
+                    t.WriteLine($"L_{{{name}}}\\left(x_1,y_1,s_1,t_1\\right)=\\left(s_1S_{{{name}cx}}\\left(t_1\\right)+x_1,s_1S_{{{name}cy}}\\left(t_1\\right)+y_1\\right)");
                 }
             }
         }
@@ -109,6 +165,11 @@ namespace FontToGeometry
             return $"{Str(ValueStart)}<t_1<{Str(ValueEnd)}:\\phi\\left({Str(Start.Y)},{Str(End.Y)},\\frac{{\\left(t_1-{Str(ValueStart)}\\right)}}{{{Str(ValueEnd - ValueStart)}}}\\right)";
         }
 
+        /// <summary>
+        /// Gets rid of scientific notation
+        /// </summary>
+        /// <param name="input"></param>
+        /// <returns></returns>
         private static string Str(double input)
         {
             var strOrig = input.ToString(CultureInfo.InvariantCulture);
